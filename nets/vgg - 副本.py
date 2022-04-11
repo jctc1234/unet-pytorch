@@ -1,6 +1,6 @@
+import torch
 import torch.nn as nn
-from torch.hub import load_state_dict_from_url
-
+from torchvision.models.utils import load_state_dict_from_url
 
 class VGG(nn.Module):
     def __init__(self, features, num_classes=1000):
@@ -59,13 +59,16 @@ def make_layers(cfg, batch_norm=False, in_channels = 3):
     return nn.Sequential(*layers)
 # 512,512,3 -> 512,512,64 -> 256,256,64 -> 256,256,128 -> 128,128,128 -> 128,128,256 -> 64,64,256
 # 64,64,512 -> 32,32,512 -> 32,32,512
+#256->16
+#128->8
+
 cfgs = {
     'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
 }
 
 
 def VGG16(pretrained, in_channels = 3, **kwargs):
-    model = VGG(make_layers(cfgs["D"], batch_norm = False , in_channels = in_channels), **kwargs)
+    model = VGG(make_layers(cfgs["D"], batch_norm = False, in_channels = in_channels), **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url("https://download.pytorch.org/models/vgg16-397923af.pth", model_dir="./model_data")
         model.load_state_dict(state_dict)
