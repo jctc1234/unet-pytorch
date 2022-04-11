@@ -4,12 +4,12 @@ import cv2
 import numpy as np
 from PIL import Image
 from torch.utils.data.dataset import Dataset
-
+import albumentations as A
 from utils.utils import cvtColor, preprocess_input
 
 
 class UnetDataset(Dataset):
-    def __init__(self, annotation_lines, input_shape, num_classes, train, dataset_path):
+    def __init__(self, annotation_lines, input_shape, num_classes, train, dataset_path,zhifangjunheng=False):
         super(UnetDataset, self).__init__()
         self.annotation_lines   = annotation_lines
         self.length             = len(annotation_lines)
@@ -17,7 +17,7 @@ class UnetDataset(Dataset):
         self.num_classes        = num_classes
         self.train              = train
         self.dataset_path       = dataset_path
-
+        self.zhifangjunheng=zhifangjunheng
     def __len__(self):
         return self.length
 
@@ -28,7 +28,17 @@ class UnetDataset(Dataset):
         #-------------------------------#
         #   从文件中读取图像
         #-------------------------------#
-        jpg         = Image.open(os.path.join(os.path.join(self.dataset_path, "VOC2007/JPEGImages"), name + ".jpg"))
+        if  self.zhifangjunheng:
+            jpg = cv2.imread(os.path.join(os.path.join(self.dataset_path, "VOC2007/JPEGImages"), name + ".jpg"))
+            jpg = cv2.GaussianBlur(jpg, (7, 7), 1)
+            jpg = A.CLAHE(clip_limit=(4, 4), tile_grid_size=(8, 8), always_apply=True, p=1.0)(image=image)
+            jpg = jpg['image']
+
+            jpg = Image.fromarray(jpg)
+        else:
+            jpg = Image.open(os.path.join(os.path.join(self.dataset_path, "VOC2007/JPEGImages"), name + ".jpg"))
+
+
         png         = Image.open(os.path.join(os.path.join(self.dataset_path, "VOC2007/SegmentationClass"), name + ".png"))
         #-------------------------------#
         #   数据增强

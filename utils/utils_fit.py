@@ -8,7 +8,7 @@ from utils.utils import get_lr
 from utils.utils_metrics import f_score
 
 
-def fit_one_epoch(model_train, model, loss_history, optimizer, epoch, epoch_step, epoch_step_val, gen, gen_val, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, save_period, save_dir):
+def fit_one_epoch(model_train, model, loss_history, optimizer, epoch, epoch_step, epoch_step_val, gen, gen_val, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir):
     total_loss      = 0
     total_f_score   = 0
 
@@ -35,25 +35,45 @@ def fit_one_epoch(model_train, model, loss_history, optimizer, epoch, epoch_step
                     weights = weights.cuda()
 
             optimizer.zero_grad()
+            if not fp16:
+                outputs = model_train(imgs)
+                if focal_loss:
+                    loss = Focal_Loss(outputs, pngs, weights, num_classes = num_classes)
+                else:
+                    loss = CE_Loss(outputs, pngs, weights, num_classes = num_classes)
 
-            outputs = model_train(imgs)
-            if focal_loss:
-                loss = Focal_Loss(outputs, pngs, weights, num_classes = num_classes)
+                if dice_loss:
+                    main_dice = Dice_loss(outputs, labels)
+                    loss      = loss + main_dice
+
+                with torch.no_grad():
+                    #-------------------------------#
+                    #   计算f_score
+                    #-------------------------------#
+                    _f_score = f_score(outputs, labels)
+
+                loss.backward()
+                optimizer.step()
             else:
-                loss = CE_Loss(outputs, pngs, weights, num_classes = num_classes)
+                from torch.cuda.amp import autocast
+                with autocast():
+                    outputs = model_train(imgs)
+                    if focal_loss:
+                        loss = Focal_Loss(outputs, pngs, weights, num_classes=num_classes)
+                    else:
+                        loss = CE_Loss(outputs, pngs, weights, num_classes=num_classes)
+                    if dice_loss:
+                        main_dice = Dice_loss(outputs, labels)
+                        loss = loss + main_dice
+                    with torch.no_grad():
+                        # -------------------------------#
+                        #   计算f_score
+                        # -------------------------------#
+                        _f_score = f_score(outputs, labels)
 
-            if dice_loss:
-                main_dice = Dice_loss(outputs, labels)
-                loss      = loss + main_dice
-
-            with torch.no_grad():
-                #-------------------------------#
-                #   计算f_score
-                #-------------------------------#
-                _f_score = f_score(outputs, labels)
-
-            loss.backward()
-            optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
             total_loss      += loss.item()
             total_f_score   += _f_score.item()
