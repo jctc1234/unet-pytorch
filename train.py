@@ -7,6 +7,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from nets.unet import Unet
+from nets.unetpp import NestedUNet
 from nets.unet_training import get_lr_scheduler, set_optimizer_lr, weights_init
 from utils.callbacks import LossHistory
 from utils.dataloader import UnetDataset, unet_dataset_collate
@@ -42,17 +43,30 @@ if __name__ == "__main__":
     #           没有GPU可以设置成False
     #---------------------------------#
     Cuda = True
+    # ------------------------------------------------------------------#
+    #   fp16            是否使用混合精度训练
+    #                   可减少约一半的显存
+    #                   需要pytorch1.6.0以上
+    # ------------------------------------------------------------------#
+    fp16 = False
     #-----------------------------------------------------#
     #   num_classes     训练自己的数据集必须要修改的
     #                   自己需要的分类个数+1，如2+1
     #-----------------------------------------------------#
-    num_classes = 21
+    num_classes = 5
     #-----------------------------------------------------#
     #   主干网络选择
     #   vgg
     #   resnet50
     #-----------------------------------------------------#
     backbone    = "vgg"
+    #-----------------------------------------------------#
+    #   unet类型选择
+    #   unetpp
+    #   unet
+    #-----------------------------------------------------#
+    nettype='unetpp'
+    zhifangjunheng=False
     #----------------------------------------------------------------------------------------------------------------------------#
     #   pretrained      是否使用主干网络的预训练权重，此处使用的是主干的权重，因此是在模型构建的时候进行加载的。
     #                   如果设置了model_path，则主干的权值无需加载，pretrained的值无意义。
@@ -78,12 +92,13 @@ if __name__ == "__main__":
     #   一般来讲，网络从0开始的训练效果会很差，因为权值太过随机，特征提取效果不明显，因此非常、非常、非常不建议大家从0开始训练！
     #   如果一定要从0开始，可以了解imagenet数据集，首先训练分类模型，获得网络的主干部分权值，分类模型的 主干部分 和该模型通用，基于此进行训练。
     #----------------------------------------------------------------------------------------------------------------------------#
-    model_path  = "model_data/unet_vgg_voc.pth"
+    # model_path  = "model_data/unet_vgg_voc.pth"
+    model_path  = "logs/ep001-loss0.249-val_loss0.127.pth"
     #-----------------------------------------------------#
     #   input_shape     输入图片的大小，32的倍数
     #-----------------------------------------------------#
-    input_shape = [512, 512]
-    
+    # input_shape = [512, 512]
+    input_shape = [256, 256]
     #----------------------------------------------------------------------------------------------------------------------------#
     #   训练分为两个阶段，分别是冻结阶段和解冻阶段。设置冻结阶段是为了满足机器性能不足的同学的训练需求。
     #   冻结训练需要的显存较小，显卡非常差的情况下，可设置Freeze_Epoch等于UnFreeze_Epoch，此时仅仅进行冻结训练。
@@ -126,9 +141,9 @@ if __name__ == "__main__":
     #   Freeze_batch_size   模型冻结训练的batch_size
     #                       (当Freeze_Train=False时失效)
     #------------------------------------------------------------------#
-    Init_Epoch          = 0
-    Freeze_Epoch        = 50
-    Freeze_batch_size   = 2
+    Init_Epoch          = 6
+    Freeze_Epoch        = 0
+    Freeze_batch_size   = 4
     #------------------------------------------------------------------#
     #   解冻阶段训练参数
     #   此时模型的主干不被冻结了，特征提取网络会发生改变
@@ -137,7 +152,7 @@ if __name__ == "__main__":
     #   Unfreeze_batch_size     模型在解冻后的batch_size
     #------------------------------------------------------------------#
     UnFreeze_Epoch      = 100
-    Unfreeze_batch_size = 2
+    Unfreeze_batch_size = 4
     #------------------------------------------------------------------#
     #   Freeze_Train    是否进行冻结训练
     #                   默认先冻结主干训练后解冻训练。
@@ -182,18 +197,18 @@ if __name__ == "__main__":
     #------------------------------#
     #   数据集路径
     #------------------------------#
-    VOCdevkit_path  = 'VOCdevkit'
+    VOCdevkit_path  = 'gangjin_jingjian'
     #------------------------------------------------------------------#
     #   建议选项：
     #   种类少（几类）时，设置为True
     #   种类多（十几类）时，如果batch_size比较大（10以上），那么设置为True
     #   种类多（十几类）时，如果batch_size比较小（10以下），那么设置为False
     #------------------------------------------------------------------#
-    dice_loss       = False
+    dice_loss       = True
     #------------------------------------------------------------------#
     #   是否使用focal loss来防止正负样本不平衡
     #------------------------------------------------------------------#
-    focal_loss      = False
+    focal_loss      = True
     #------------------------------------------------------------------#
     #   是否给不同种类赋予不同的损失权值，默认是平衡的。
     #   设置的话，注意设置成numpy形式的，长度和num_classes一样。
@@ -209,8 +224,11 @@ if __name__ == "__main__":
     #                   在IO为瓶颈的时候再开启多线程，即GPU运算速度远大于读取图片的速度。
     #------------------------------------------------------------------#
     num_workers         = 4
+    if nettype=='unetpp':
+        model=NestedUNet(num_classes=num_classes, pretrained=pretrained, backbone=backbone).train()
+    else:
 
-    model = Unet(num_classes=num_classes, pretrained=pretrained, backbone=backbone).train()
+        model = Unet(num_classes=num_classes, pretrained=pretrained, backbone=backbone).train()
     if not pretrained:
         weights_init(model)
     if model_path != '':
@@ -226,7 +244,11 @@ if __name__ == "__main__":
         model.load_state_dict(model_dict)
 
     loss_history = LossHistory(save_dir, model, input_shape=input_shape)
-    
+    if fp16:
+        from torch.cuda.amp import GradScaler as GradScaler
+        scaler = GradScaler()
+    else:
+        scaler = None
     model_train = model.train()
     if Cuda:
         model_train = torch.nn.DataParallel(model)
@@ -295,8 +317,8 @@ if __name__ == "__main__":
         if epoch_step == 0 or epoch_step_val == 0:
             raise ValueError("数据集过小，无法继续进行训练，请扩充数据集。")
 
-        train_dataset   = UnetDataset(train_lines, input_shape, num_classes, True, VOCdevkit_path)
-        val_dataset     = UnetDataset(val_lines, input_shape, num_classes, False, VOCdevkit_path)
+        train_dataset   = UnetDataset(train_lines, input_shape, num_classes, True, VOCdevkit_path,zhifangjunheng)
+        val_dataset     = UnetDataset(val_lines, input_shape, num_classes, False, VOCdevkit_path,zhifangjunheng)
         gen             = DataLoader(train_dataset, shuffle = True, batch_size = batch_size, num_workers = num_workers, pin_memory=True,
                                     drop_last = True, collate_fn = unet_dataset_collate)
         gen_val         = DataLoader(val_dataset  , shuffle = True, batch_size = batch_size, num_workers = num_workers, pin_memory=True, 
@@ -344,6 +366,6 @@ if __name__ == "__main__":
             set_optimizer_lr(optimizer, lr_scheduler_func, epoch)
 
             fit_one_epoch(model_train, model, loss_history, optimizer, epoch, 
-                    epoch_step, epoch_step_val, gen, gen_val, UnFreeze_Epoch, Cuda, dice_loss, focal_loss, cls_weights, num_classes, save_period, save_dir)
+                    epoch_step, epoch_step_val, gen, gen_val, UnFreeze_Epoch, Cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir)
 
         loss_history.writer.close()

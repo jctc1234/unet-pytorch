@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torch import nn
-
+from nets.unetpp import NestedUNet
 from nets.unet import Unet as unet
 from utils.utils import cvtColor, preprocess_input, resize_image
 
@@ -26,19 +26,25 @@ class Unet(object):
         #   训练好后logs文件夹下存在多个权值文件，选择验证集损失较低的即可。
         #   验证集损失较低不代表miou较高，仅代表该权值在验证集上泛化性能较好。
         #-------------------------------------------------------------------#
-        "model_path"    : 'model_data/unet_vgg_voc.pth',
+        "model_path"    : 'logs/ep001-loss0.249-val_loss0.127.pth',
         #--------------------------------#
         #   所需要区分的类的个数+1
         #--------------------------------#
-        "num_classes"   : 21,
+        "num_classes"   : 5,
         #--------------------------------#
         #   所使用的的主干网络：vgg、resnet50   
         #--------------------------------#
         "backbone"      : "vgg",
+        #-----------------------------------------------------#
+        #   unet类型选择
+        #   unetpp
+        #   unet
+        #-----------------------------------------------------#
+        'nettype':'unetpp',
         #--------------------------------#
         #   输入图片的大小
         #--------------------------------#
-        "input_shape"   : [512, 512],
+        "input_shape" : [256, 256],
         #-------------------------------------------------#
         #   mix_type参数用于控制检测结果的可视化方式
         #
@@ -46,7 +52,7 @@ class Unet(object):
         #   mix_type = 1的时候代表仅保留生成的图
         #   mix_type = 2的时候代表仅扣去背景，仅保留原图中的目标
         #-------------------------------------------------#
-        "mix_type"      : 0,
+        "mix_type"     : 0,
         #--------------------------------#
         #   是否使用Cuda
         #   没有GPU可以设置成False
@@ -82,8 +88,10 @@ class Unet(object):
     #   获得所有的分类
     #---------------------------------------------------#
     def generate(self):
-        self.net = unet(num_classes = self.num_classes, backbone=self.backbone)
-
+        if self.nettype == 'unetpp':
+            self.net = NestedUNet(num_classes=self.num_classes, backbone=self.backbone)
+        else:
+            self.net = unet(num_classes=self.num_classes, backbone=self.backbone)
         device      = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net.load_state_dict(torch.load(self.model_path, map_location=device))
         self.net    = self.net.eval()

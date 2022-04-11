@@ -3,13 +3,22 @@
 #   整合到了一个py文件中，通过指定mode进行模式的修改。
 #----------------------------------------------------#
 import time
-
+import shutil
 import cv2
 import numpy as np
 from PIL import Image
-
+from scipy import linalg
+import albumentations as A
 from unet import Unet
-
+def zca(a):
+    mean = np.mean(a, axis=0)
+    mdata = a - mean
+    sigma = np.dot(mdata.T, mdata) / mdata.shape[0]
+    U, S, V = linalg.svd(sigma)
+    components = np.dot(np.dot(U, np.diag(1 / np.sqrt(S) + 1e-6)), U.T)
+    whiten = np.dot(a - mean, components.T)
+    whiten2=(whiten-whiten.min())/(whiten.max()-whiten.min())*255
+    return whiten2
 if __name__ == "__main__":
     #-------------------------------------------------------------------------#
     #   如果想要修改对应种类的颜色，到__init__函数里修改self.colors即可
@@ -22,7 +31,7 @@ if __name__ == "__main__":
     #   'fps'表示测试fps，使用的图片是img里面的street.jpg，详情查看下方注释。
     #   'dir_predict'表示遍历文件夹进行检测并保存。默认遍历img文件夹，保存img_out文件夹，详情查看下方注释。
     #----------------------------------------------------------------------------------------------------------#
-    mode = "predict"
+    mode = "256"
     #----------------------------------------------------------------------------------------------------------#
     #   video_path用于指定视频的路径，当video_path=0时表示检测摄像头
     #   想要检测视频，则设置如video_path = "xxx.mp4"即可，代表读取出根目录下的xxx.mp4文件。
@@ -47,6 +56,7 @@ if __name__ == "__main__":
     #-------------------------------------------------------------------------#
     dir_origin_path = "img/"
     dir_save_path   = "img_out/"
+    dir_not_path       =           'img_not/'
 
     if mode == "predict":
         '''
@@ -132,11 +142,94 @@ if __name__ == "__main__":
         for img_name in tqdm(img_names):
             if img_name.lower().endswith(('.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
                 image_path  = os.path.join(dir_origin_path, img_name)
-                image       = Image.open(image_path)
-                r_image     = unet.detect_image(image)
+                image       = cv2.imread(image_path,0)
+
+
+                #
+                # image = image.astype(np.uint8)
+                # h, w = image.shape[:2]
+                # mask = np.zeros([h + 2, w + 2], np.uint8)
+                # cv2.floodFill(image, mask, (500, 500), 255, 3, 5)
+                # cv2.floodFill(image, mask, (510, 510), 255, 3, 5)
+
+
+                image = cv2.GaussianBlur(image, (7, 7), 1)
+                image2 = A.CLAHE(clip_limit=(4, 4), tile_grid_size=(8, 8), always_apply=True, p=1.0)(image=image)
+                image2=image2['image']
+                # image2 = zca(image)
+                image2=Image.fromarray(image2)
+                image = Image.fromarray(image)
+                # image2 = Image.fromarray(image2)
+                r_image = unet.detect_image(image2)
+
+
+
                 if not os.path.exists(dir_save_path):
                     os.makedirs(dir_save_path)
                 r_image.save(os.path.join(dir_save_path, img_name))
-                
+
+    elif mode == "512":
+        import os
+        from tqdm import tqdm
+
+        img_names = os.listdir(dir_origin_path)
+        for img_name in tqdm(img_names):
+            if img_name.lower().endswith(
+                    ('.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
+                image_path = os.path.join(dir_origin_path, img_name)
+                image = cv2.imread(image_path, 0)
+                tar = cv2.imread(image_path)
+                size=image.shape
+                image = cv2.GaussianBlur(image, (7, 7), 1)
+                image2 = A.CLAHE(clip_limit=(4, 4), tile_grid_size=(8, 8), always_apply=True, p=1.0)(image=image)
+                image2=image2['image']
+                # target = Image.new('RGB', (1024,1024))
+                for i in range(0, int(size[0]/512+0.5)):
+                    for j in range(0, int(size[1]/512+0.5)):
+                        a = image[i * 512:(i + 1) * 512, j * 512:(j + 1) * 512]
+                        b = image2[i * 512:(i + 1) * 512, j * 512:(j + 1) * 512]
+                        # cv.imwrite(xindizhi + name.replace('.jpg', '_'+str(i)+'_'+str(j)+'.jpg'), aa)
+                        a = Image.fromarray(a)
+                        b= Image.fromarray(b)
+                        r_image, baifenbi = unet.detect_image(b, a)
+                        tar[i * 512:(i + 1) * 512, j * 512:(j + 1) * 512]=r_image
+
+                # self.image2 = zca(image)
+
+                # image2 = Image.fromarray(image2)
+
+
+                if not os.path.exists(dir_save_path):
+                    os.makedirs(dir_save_path)
+                cv2.imwrite(os.path.join(dir_save_path, img_name),tar,)
+    elif mode == "256":
+        import os
+        from tqdm import tqdm
+
+        img_names = os.listdir(dir_origin_path)
+        for img_name in tqdm(img_names):
+            if img_name.lower().endswith(
+                    ('.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
+                image_path = os.path.join(dir_origin_path, img_name)
+                image = cv2.imread(image_path, 0)
+                tar = cv2.imread(image_path)
+                size=image.shape
+                image = cv2.GaussianBlur(image, (7, 7), 1)
+                image2 = A.CLAHE(clip_limit=(4, 4), tile_grid_size=(8, 8), always_apply=True, p=1.0)(image=image)
+                image2=image2['image']
+                # target = Image.new('RGB', (1024,1024))
+                for i in range(0, int(size[0]/256+0.5)):
+                    for j in range(0, int(size[1]/256+0.5)):
+                        a = image[i * 256:(i + 1) * 256, j * 256:(j + 1) * 256]
+                        b = image2[i * 256:(i + 1) * 256, j * 256:(j + 1) * 256]
+                        # cv.imwrite(xindizhi + name.replace('.jpg', '_'+str(i)+'_'+str(j)+'.jpg'), aa)
+                        a = Image.fromarray(a)
+                        b = Image.fromarray(b)
+                        r_image= unet.detect_image(b,)
+                        tar[i * 256:(i + 1) * 256, j * 256:(j + 1) * 256]=r_image
+
+                if not os.path.exists(dir_save_path):
+                    os.makedirs(dir_save_path)
+                cv2.imwrite(os.path.join(dir_save_path, img_name),tar,)
     else:
         raise AssertionError("Please specify the correct mode: 'predict', 'video', 'fps' or 'dir_predict'.")
